@@ -2049,6 +2049,7 @@ export default function App() {
                     toolName={message.uiMeta.toolName}
                     toolArgs={message.uiMeta.toolArgs}
                     toolResult={message.uiMeta.toolResult}
+                    themeMode={themeMode}
                   />
                 )}
                 {message.uiMeta && !message.uiMeta.client && (
