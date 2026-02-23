@@ -181,7 +181,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          assets=(release-assets/windows/* release-assets/macos/*)
+          assets=(release-assets/windows/*.exe release-assets/macos/*.dmg release-assets/macos/*.zip)
 
           if gh release view "$TAG" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
             echo "Release $TAG exists; uploading/replacing assets."
