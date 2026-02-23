@@ -16,8 +16,12 @@ on:
 
 jobs:
   windows-installer:
-    name: Windows NSIS
+    name: Windows NSIS (${{ matrix.arch }})
     runs-on: windows-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        arch: [x64, arm64]
     env:
       CSC_IDENTITY_AUTO_DISCOVERY: "false"
     steps:
@@ -50,12 +54,18 @@ jobs:
         run: npm run release:preflight:win
 
       - name: Build Windows installer
-        run: npm run build:desktop:win
+        shell: bash
+        run: |
+          if [ "${{ matrix.arch }}" = "arm64" ]; then
+            npm run build:desktop:win:arm64
+          else
+            npm run build:desktop:win
+          fi
 
       - name: Upload Windows artifacts
         uses: actions/upload-artifact@v4
         with:
-          name: openchat-windows-installer
+          name: openchat-windows-installer-${{ matrix.arch }}
           path: |
             dist-desktop\*.exe
             dist-desktop\*.yml
@@ -137,8 +147,14 @@ jobs:
       - name: Download Windows artifacts
         uses: actions/download-artifact@v4
         with:
-          name: openchat-windows-installer
-          path: release-assets/windows
+          name: openchat-windows-installer-x64
+          path: release-assets/windows/x64
+
+      - name: Download Windows ARM64 artifacts
+        uses: actions/download-artifact@v4
+        with:
+          name: openchat-windows-installer-arm64
+          path: release-assets/windows/arm64
 
       - name: Download macOS artifacts
         uses: actions/download-artifact@v4
@@ -181,7 +197,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          assets=(release-assets/windows/*.exe release-assets/macos/*.dmg release-assets/macos/*.zip)
+          assets=(release-assets/windows/x64/*.exe release-assets/windows/arm64/*.exe release-assets/macos/*.dmg release-assets/macos/*.zip)
 
           if gh release view "$TAG" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
             echo "Release $TAG exists; uploading/replacing assets."

@@ -21,6 +21,7 @@
     "build:desktop:unsigned": "npm run prereq:desktop && npm run version:bump:patch && npm run build && electron-builder --win --mac --publish never",
     "build:desktop:all": "npm run prereq:desktop && npm run version:bump:patch && npm run build && electron-builder --win --mac --publish never",
     "build:desktop:win": "npm run prereq:desktop:win && npm run version:bump:patch && npm run build && electron-builder --win --publish never",
+    "build:desktop:win:arm64": "npm run prereq:desktop:win && npm run version:bump:patch && npm run build && electron-builder --win --arm64 --publish never",
     "build:desktop:mac": "npm run prereq:desktop:mac && npm run version:bump:patch && npm run build && electron-builder --mac --publish never",
     "build:desktop:dir": "npm run prereq:desktop:win && npm run build && electron-builder --win --dir --publish never",
     "start:desktop": "npm run build && electron desktop/main.mjs",
