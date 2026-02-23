@@ -26,6 +26,25 @@ OpenChat is a desktop-first chat client for MCP servers with:
 └─ shared/   # Shared TypeScript contracts
 ```
 
+## Prerequisites
+
+- Node.js LTS (includes npm) installed and available on PATH.
+- From repository root, install dependencies (root + package folders):
+
+```bash
+npm run install:all
+```
+
+- Verify toolchain:
+
+```bash
+node -v
+npm -v
+```
+
+If `npm` is not found on macOS, install Node.js LTS first (for example via [nodejs.org](https://nodejs.org), Homebrew, or nvm), then open a new terminal session.
+If builds fail with `tsc: command not found`, run `npm run install:all` from the repository root.
+
 ## Run desktop locally
 
 ```powershell
@@ -58,6 +77,8 @@ npm run build
 cd <path-to-OpenChat>
 npm run build:desktop
 ```
+
+Desktop build commands run a prerequisite check first and will fail fast with setup guidance when required tooling is missing.
 
 ### Internal/beta unsigned installers
 
