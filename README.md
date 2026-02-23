@@ -7,6 +7,15 @@ OpenChat is a desktop-first chat client for MCP servers with:
 - MCP Apps interactive UI rendering (`ui://` resources)
 - an optional **🔍 XRay** explainability panel
 
+### Dark Mode
+<img width="2142" height="1431" alt="image" src="https://github.com/user-attachments/assets/30cbc200-2010-44a1-91de-982e8da6d189" />
+
+### Light Mode
+<img width="2139" height="1346" alt="image" src="https://github.com/user-attachments/assets/9e687572-b3e5-4c35-8869-89bf65e65d08" />
+
+### C64 Mode 🤣
+<img width="2139" height="1346" alt="image" src="https://github.com/user-attachments/assets/3f74850e-8e56-4841-b3a1-f1a463e3a5e8" />
+
 ## Folder layout
 
 ```text
