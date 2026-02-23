@@ -25,7 +25,11 @@ jobs:
           cache: "npm"
 
       - name: Install dependencies
-        run: npm ci
+        run: |
+          npm ci
+          npm --prefix shared ci
+          npm --prefix server ci
+          npm --prefix client ci
 
       - name: Signing preflight (Windows)
         run: npm run release:preflight:win
@@ -63,7 +67,11 @@ jobs:
           cache: "npm"
 
       - name: Install dependencies
-        run: npm ci
+        run: |
+          npm ci
+          npm --prefix shared ci
+          npm --prefix server ci
+          npm --prefix client ci
 
       - name: Signing preflight (macOS)
         run: npm run release:preflight:mac
