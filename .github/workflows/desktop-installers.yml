@@ -1,0 +1,83 @@
+name: Desktop Installers
+
+on:
+  workflow_dispatch:
+  push:
+    tags:
+      - "v*"
+
+jobs:
+  windows-installer:
+    name: Windows NSIS
+    runs-on: windows-latest
+    env:
+      CSC_LINK: ${{ secrets.WINDOWS_CSC_LINK }}
+      CSC_KEY_PASSWORD: ${{ secrets.WINDOWS_CSC_KEY_PASSWORD }}
+      CSC_IDENTITY_AUTO_DISCOVERY: "false"
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: "npm"
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Signing preflight (Windows)
+        run: npm run release:preflight:win
+
+      - name: Build Windows installer
+        run: npm run build:desktop:win
+
+      - name: Upload Windows artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: openchat-windows-installer
+          path: |
+            dist-desktop\*.exe
+            dist-desktop\*.yml
+            dist-desktop\*.blockmap
+          if-no-files-found: error
+
+  mac-installer:
+    name: macOS DMG/ZIP
+    runs-on: macos-latest
+    env:
+      CSC_LINK: ${{ secrets.MACOS_CSC_LINK }}
+      CSC_KEY_PASSWORD: ${{ secrets.MACOS_CSC_KEY_PASSWORD }}
+      APPLE_ID: ${{ secrets.APPLE_ID }}
+      APPLE_APP_SPECIFIC_PASSWORD: ${{ secrets.APPLE_APP_SPECIFIC_PASSWORD }}
+      APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: "npm"
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Signing preflight (macOS)
+        run: npm run release:preflight:mac
+
+      - name: Build macOS installer
+        run: npm run build:desktop:mac
+
+      - name: Upload macOS artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: openchat-macos-installer
+          path: |
+            dist-desktop/*.dmg
+            dist-desktop/*.zip
+            dist-desktop/*.yml
+            dist-desktop/*.blockmap
+          if-no-files-found: error

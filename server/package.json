@@ -1,0 +1,26 @@
+{
+  "name": "openchat-server",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "main": "./dist/index.js",
+  "scripts": {
+    "dev": "tsx watch src/index.ts",
+    "build": "tsc -p tsconfig.json",
+    "start": "node dist/index.js"
+  },
+  "dependencies": {
+    "@openchat/shared": "file:../shared",
+    "@modelcontextprotocol/sdk": "^1.26.0",
+    "cors": "^2.8.6",
+    "express": "^5.2.1",
+    "zod": "^4.3.6"
+  },
+  "devDependencies": {
+    "@types/cors": "^2.8.19",
+    "@types/express": "^5.0.6",
+    "@types/node": "^25.3.0",
+    "tsx": "^4.21.0",
+    "typescript": "^5.9.3"
+  }
+}

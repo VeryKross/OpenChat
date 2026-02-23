@@ -1,0 +1,86 @@
+{
+  "name": "openchat",
+  "version": "0.1.1",
+  "description": "OpenChat desktop app for LLM, MCP, and tool interaction transparency.",
+  "author": "OpenChat Team",
+  "private": true,
+  "type": "module",
+  "main": "desktop/main.mjs",
+  "scripts": {
+    "dev": "npm run dev:desktop",
+    "dev:web": "npm --prefix shared run build && npm --prefix server run build && concurrently --kill-others-on-fail \"npm --prefix server run start\" \"npm --prefix client run dev\"",
+    "dev:desktop": "npm --prefix shared run build && npm --prefix server run build && concurrently --kill-others-on-fail \"npm --prefix client run dev\" \"wait-on tcp:5180 && cross-env OPENCHAT_DEV_URL=http://localhost:5180 electron desktop/main.mjs\"",
+    "dev:watch": "concurrently --kill-others-on-fail \"npm --prefix server run dev\" \"npm --prefix client run dev\"",
+    "build": "npm --prefix shared run build && npm --prefix server run build && npm --prefix client run build",
+    "version:bump:patch": "npm version patch --no-git-tag-version",
+    "build:desktop": "npm run version:bump:patch && npm run build && electron-builder --win --mac --publish never",
+    "build:desktop:unsigned": "npm run version:bump:patch && npm run build && electron-builder --win --mac --publish never",
+    "build:desktop:all": "npm run version:bump:patch && npm run build && electron-builder --win --mac --publish never",
+    "build:desktop:win": "npm run version:bump:patch && npm run build && electron-builder --win --publish never",
+    "build:desktop:mac": "npm run version:bump:patch && npm run build && electron-builder --mac --publish never",
+    "build:desktop:dir": "npm run build && electron-builder --win --dir --publish never",
+    "start:desktop": "npm run build && electron desktop/main.mjs",
+    "release:preflight:win": "node desktop/signing-preflight.mjs win",
+    "release:preflight:mac": "node desktop/signing-preflight.mjs mac"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.26.0",
+    "cors": "^2.8.6",
+    "express": "^5.2.1",
+    "zod": "^4.3.6"
+  },
+  "devDependencies": {
+    "concurrently": "^9.2.1",
+    "cross-env": "^10.1.0",
+    "electron": "^35.5.1",
+    "electron-builder": "^25.1.8",
+    "wait-on": "^8.0.5"
+  },
+  "build": {
+    "appId": "com.openchat.desktop",
+    "productName": "OpenChat",
+    "artifactName": "${productName}-${version}-${os}-${arch}.${ext}",
+    "asar": true,
+    "directories": {
+      "output": "dist-desktop",
+      "buildResources": "desktop/assets"
+    },
+    "files": [
+      "desktop/**/*",
+      "client/dist/**/*",
+      "server/dist/**/*",
+      "server/node_modules/**/*",
+      "shared/dist/**/*",
+      "package.json"
+    ],
+    "win": {
+      "icon": "icons/openchat.ico",
+      "signtoolOptions": {
+        "publisherName": "OpenChat Team"
+      },
+      "target": [
+        "nsis"
+      ]
+    },
+    "nsis": {
+      "oneClick": false,
+      "allowToChangeInstallationDirectory": true,
+      "createDesktopShortcut": true,
+      "createStartMenuShortcut": true,
+      "shortcutName": "OpenChat"
+    },
+    "mac": {
+      "icon": "icons/openchat.icns",
+      "hardenedRuntime": true,
+      "gatekeeperAssess": false,
+      "target": [
+        "dmg",
+        "zip"
+      ],
+      "category": "public.app-category.developer-tools"
+    },
+    "dmg": {
+      "title": "OpenChat Installer"
+    }
+  }
+}
