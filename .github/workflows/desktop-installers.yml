@@ -95,7 +95,15 @@ jobs:
         run: npm run release:preflight:mac
 
       - name: Build macOS installer
-        run: npm run build:desktop:mac
+        shell: bash
+        run: |
+          if [ -n "${CSC_LINK:-}" ] && [ -n "${CSC_KEY_PASSWORD:-}" ]; then
+            echo "macOS build mode: signed"
+          else
+            unset CSC_LINK CSC_KEY_PASSWORD APPLE_ID APPLE_APP_SPECIFIC_PASSWORD APPLE_TEAM_ID
+            echo "macOS build mode: unsigned"
+          fi
+          npm run build:desktop:mac
 
       - name: Upload macOS artifacts
         uses: actions/upload-artifact@v4
