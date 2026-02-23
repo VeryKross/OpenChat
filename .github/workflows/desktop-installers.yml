@@ -11,8 +11,6 @@ jobs:
     name: Windows NSIS
     runs-on: windows-latest
     env:
-      CSC_LINK: ${{ secrets.WINDOWS_CSC_LINK }}
-      CSC_KEY_PASSWORD: ${{ secrets.WINDOWS_CSC_KEY_PASSWORD }}
       CSC_IDENTITY_AUTO_DISCOVERY: "false"
     steps:
       - name: Checkout
@@ -30,6 +28,15 @@ jobs:
           npm --prefix shared ci
           npm --prefix server ci
           npm --prefix client ci
+
+      - name: Export signing credentials (Windows)
+        shell: bash
+        env:
+          _CSC_LINK: ${{ secrets.WINDOWS_CSC_LINK }}
+          _CSC_KEY_PASSWORD: ${{ secrets.WINDOWS_CSC_KEY_PASSWORD }}
+        run: |
+          [ -n "$_CSC_LINK" ]         && echo "CSC_LINK=$_CSC_LINK" >> "$GITHUB_ENV" || true
+          [ -n "$_CSC_KEY_PASSWORD" ] && echo "CSC_KEY_PASSWORD=$_CSC_KEY_PASSWORD" >> "$GITHUB_ENV" || true
 
       - name: Signing preflight (Windows)
         run: npm run release:preflight:win
@@ -51,12 +58,7 @@ jobs:
     name: macOS DMG/ZIP
     runs-on: macos-latest
     env:
-      CSC_LINK: ${{ secrets.MACOS_CSC_LINK }}
-      CSC_KEY_PASSWORD: ${{ secrets.MACOS_CSC_KEY_PASSWORD }}
       CSC_IDENTITY_AUTO_DISCOVERY: "false"
-      APPLE_ID: ${{ secrets.APPLE_ID }}
-      APPLE_APP_SPECIFIC_PASSWORD: ${{ secrets.APPLE_APP_SPECIFIC_PASSWORD }}
-      APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -73,6 +75,21 @@ jobs:
           npm --prefix shared ci
           npm --prefix server ci
           npm --prefix client ci
+
+      - name: Export signing credentials (macOS)
+        shell: bash
+        env:
+          _CSC_LINK: ${{ secrets.MACOS_CSC_LINK }}
+          _CSC_KEY_PASSWORD: ${{ secrets.MACOS_CSC_KEY_PASSWORD }}
+          _APPLE_ID: ${{ secrets.APPLE_ID }}
+          _APPLE_APP_SPECIFIC_PASSWORD: ${{ secrets.APPLE_APP_SPECIFIC_PASSWORD }}
+          _APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+        run: |
+          [ -n "$_CSC_LINK" ]                    && echo "CSC_LINK=$_CSC_LINK" >> "$GITHUB_ENV" || true
+          [ -n "$_CSC_KEY_PASSWORD" ]            && echo "CSC_KEY_PASSWORD=$_CSC_KEY_PASSWORD" >> "$GITHUB_ENV" || true
+          [ -n "$_APPLE_ID" ]                    && echo "APPLE_ID=$_APPLE_ID" >> "$GITHUB_ENV" || true
+          [ -n "$_APPLE_APP_SPECIFIC_PASSWORD" ] && echo "APPLE_APP_SPECIFIC_PASSWORD=$_APPLE_APP_SPECIFIC_PASSWORD" >> "$GITHUB_ENV" || true
+          [ -n "$_APPLE_TEAM_ID" ]               && echo "APPLE_TEAM_ID=$_APPLE_TEAM_ID" >> "$GITHUB_ENV" || true
 
       - name: Signing preflight (macOS)
         run: npm run release:preflight:mac
