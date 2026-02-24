@@ -26,6 +26,10 @@ OpenChat is a desktop-first chat client for MCP servers with:
 └─ shared/   # Shared TypeScript contracts
 ```
 
+## Technical documentation
+
+- [CopilotKit Integration](./COPILOTKIT_INTEGRATION.md)
+
 ## Prerequisites
 
 - Node.js LTS (includes npm) installed and available on PATH.
@@ -54,7 +58,7 @@ npm run dev
 
 - Opens Electron desktop window and uses Vite dev renderer + local API server.
 
-## Run web locally (legacy dev flow)
+## Run web locally
 
 ```powershell
 cd <path-to-OpenChat>

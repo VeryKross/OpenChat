@@ -29,6 +29,7 @@
     "release:preflight:mac": "node desktop/signing-preflight.mjs mac"
   },
   "dependencies": {
+    "@copilotkit/runtime": "^1.51.4",
     "@modelcontextprotocol/sdk": "^1.26.0",
     "cors": "^2.8.6",
     "express": "^5.2.1",
