@@ -1,8 +1,8 @@
 {
   "name": "openchat",
-  "version": "0.1.1",
+  "version": "1.0.0",
   "description": "OpenChat desktop app for LLM, MCP, and tool interaction transparency.",
-  "author": "OpenChat Team",
+  "author": "Ken Ross",
   "private": true,
   "type": "module",
   "main": "desktop/main.mjs",
