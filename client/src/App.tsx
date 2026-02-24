@@ -3,12 +3,19 @@ import type { Tool, CallToolResult } from "@modelcontextprotocol/sdk/types.js";
 import { getToolUiResourceUri } from "@modelcontextprotocol/ext-apps/app-bridge";
 import type { DiscoveredServerConfig, LlmProviderType } from "@openchat/shared";
 import { AppFrame } from "./components/AppFrame";
+import { CopilotKitMcpSync } from "./copilotkit/CopilotKitMcpSync";
+import { subscribeCopilotKitXRayEvents } from "./copilotkit/xrayAdapter";
 import { HelpCenter } from "./components/HelpCenter";
 import { XRayPanel } from "./components/XRayPanel";
 import { runChat, type LlmMessage } from "./hooks/chatService";
 import { DEFAULT_HELP_TOPIC_ID, isHelpTopicId, type HelpTopicId } from "./help/topics";
 import { useMcpConnections } from "./hooks/useMcpConnections";
 import { apiFetch } from "./lib/api";
+import {
+  getCopilotKitRuntimeUrl,
+  getOrchestrationModeLabel,
+  isCopilotKitRuntimeConfigured,
+} from "./lib/featureFlags";
 import type {
   ProviderConfig,
   ServerConfig,
@@ -162,6 +169,23 @@ function getThemeIcon(mode: ThemeMode) {
   return "C64";
 }
 
+function deriveCopilotKitMcpServers(servers: ServerConfig[]) {
+  const projections = new Map<string, { endpoint: string; apiKey?: string }>();
+  for (const server of servers) {
+    if (!server.enabled) continue;
+    const transport = server.transport ?? (server.command ? "stdio" : "http");
+    if (transport === "stdio") continue;
+    const endpoint = String(server.url ?? "").trim();
+    if (!endpoint) continue;
+    const projection = {
+      endpoint,
+      apiKey: server.authToken?.trim() || undefined,
+    };
+    projections.set(`${projection.endpoint}|${projection.apiKey ?? ""}`, projection);
+  }
+  return Array.from(projections.values());
+}
+
 export default function App() {
   const CONFIG_KEY = "openchat.config.v1";
   const LEGACY_CONFIG_KEY = "mcpchat.config.v1";
@@ -270,6 +294,8 @@ export default function App() {
   );
 
   const activeConnections = connections.filter((c) => c.status === "connected");
+  const copilotKitMcpProjection = deriveCopilotKitMcpServers(servers);
+  const transportModeLabel = "OpenChat MCP bridge (CopilotKit projected)";
   const enabledServersCount = servers.filter((server) => server.enabled).length;
   const isCustomProvider = providerType === "custom";
   const isCustomDirectMode = isCustomProvider && customProviderMode === "direct-endpoint";
@@ -322,6 +348,9 @@ export default function App() {
   if (isCustomDirectMode && !directEndpointUrl.trim()) readinessIssues.push("Direct endpoint URL not entered");
   if (isCustomDirectMode && !directModelName.trim()) readinessIssues.push("Direct model/deployment name not entered");
   const chatMode = activeConnections.length > 0 ? "LLM + MCP" : "LLM-only";
+  const orchestrationMode = getOrchestrationModeLabel();
+  const copilotKitRuntimeUrl = getCopilotKitRuntimeUrl();
+  const copilotKitMcpSyncEnabled = isCopilotKitRuntimeConfigured();
   const isDesktopRuntime = window.location.protocol === "file:" || Boolean(window.openchatDesktop?.isDesktop);
   const apiUnavailableHint = isDesktopRuntime
     ? "OpenChat local API is unavailable. Restart OpenChat and try again."
@@ -837,6 +866,29 @@ export default function App() {
     });
   };
 
+  useEffect(() => {
+    return subscribeCopilotKitXRayEvents((event) => {
+      setXrayTurns((prev) => {
+        if (prev.length === 0 || prev[prev.length - 1].complete) {
+          return [
+            ...prev,
+            {
+              prompt: "CopilotKit runtime",
+              startedAt: event.timestamp,
+              complete: true,
+              events: [event],
+            },
+          ];
+        }
+
+        const next = [...prev];
+        const last = next[next.length - 1];
+        next[next.length - 1] = { ...last, events: [...last.events, event] };
+        return next;
+      });
+    });
+  }, []);
+
   const addManualServer = () => {
     if (!manualName.trim()) {
       setManualAddStatus("Please enter a server name.");
@@ -1116,21 +1168,28 @@ export default function App() {
     await disconnectAll();
 
     const selected = servers.filter((server) => server.enabled);
+    const projected = deriveCopilotKitMcpServers(servers);
     if (selected.length === 0) {
       setConnectStatus("All server connections cleared. Check servers to connect and try again.");
       setIsConnectingServers(false);
       return;
     }
 
-    setConnectStatus(`Connecting to ${selected.length} server(s)...`);
+    setConnectStatus(
+      `Connecting to ${selected.length} server(s)... (CopilotKit MCP projection: ${projected.length})`
+    );
     const result = await connectServers(servers);
     if (result.connected > 0) {
       setConnectStatus(
-        `Connected to ${result.connected} server(s). ${result.failed > 0 ? `${result.failed} failed.` : ""}`
+        `Connected to ${result.connected} server(s). ${
+          result.failed > 0 ? `${result.failed} failed. ` : ""
+        }CopilotKit MCP projection: ${projected.length}.`
       );
     } else {
       setConnectStatus(
-        `No servers connected. ${result.failed > 0 ? "Check URLs/auth and use Test for details." : ""}`
+        `No servers connected. ${
+          result.failed > 0 ? "Check URLs/auth and use Test for details. " : ""
+        }CopilotKit MCP projection: ${projected.length}.`
       );
     }
     setIsConnectingServers(false);
@@ -1400,6 +1459,7 @@ export default function App() {
 
   return (
     <div className="app">
+      {copilotKitMcpSyncEnabled && <CopilotKitMcpSync servers={copilotKitMcpProjection} />}
       <div className="app-header">
         <h1>💬 OpenChat</h1>
         <span className="subtitle">Expose LLM, MCP, and tool interactions with transparent execution</span>
@@ -1821,7 +1881,18 @@ export default function App() {
                   : `Not ready (${readinessIssues.join(" · ")})`}
               </p>
               <p className="status-text">
-                MCP connected: {activeConnections.length} server(s) · Chat mode: {chatMode}
+                MCP connected: {activeConnections.length} server(s) · Chat mode: {chatMode} ·
+                Orchestration: {orchestrationMode}
+              </p>
+              <p className="status-text">
+                CopilotKit runtime URL: {copilotKitRuntimeUrl}
+              </p>
+              <p className="status-text">MCP transport: {transportModeLabel}</p>
+              <p className="status-text">
+                CopilotKit MCP projection: {copilotKitMcpProjection.length} HTTP/SSE endpoint(s)
+              </p>
+              <p className="status-text">
+                CopilotKit MCP sync: {copilotKitMcpSyncEnabled ? "active" : "inactive"}
               </p>
               <div className="section-block-sm">
                 <button onClick={connectConfiguredServers} disabled={isConnectingServers}>
@@ -2030,7 +2101,7 @@ export default function App() {
                 {enabledServersCount > activeConnections.length
                   ? ` (${enabledServersCount} enabled)`
                   : ""}{" "}
-                servers · {aliasedTools.length} tools · {chatMode}
+                servers · {aliasedTools.length} tools · {chatMode} · {orchestrationMode}
               </span>
               <button onClick={startNewChat}>New Chat</button>
             </div>

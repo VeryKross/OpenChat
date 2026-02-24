@@ -9,9 +9,10 @@
     "preview": "vite preview"
   },
   "dependencies": {
-    "@openchat/shared": "file:../shared",
+    "@copilotkit/react-core": "^1.51.4",
     "@modelcontextprotocol/ext-apps": "^1.0.1",
     "@modelcontextprotocol/sdk": "^1.26.0",
+    "@openchat/shared": "file:../shared",
     "react": "^19.2.0",
     "react-dom": "^19.2.0"
   },

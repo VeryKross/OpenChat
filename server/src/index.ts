@@ -7,6 +7,11 @@ import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { z } from "zod";
+import {
+  CopilotRuntime,
+  OpenAIAdapter,
+  copilotRuntimeNodeExpressEndpoint,
+} from "@copilotkit/runtime";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StdioClientTransport } from "@modelcontextprotocol/sdk/client/stdio.js";
 import { SSEClientTransport } from "@modelcontextprotocol/sdk/client/sse.js";
@@ -52,9 +57,23 @@ const BUILTIN_SKILL_LIBRARIES: SkillLibraryDefinition[] = [
 
 const app = express();
 const defaultPort = Number(process.env.PORT ?? 4173);
+const copilotRuntimeEndpointPath = "/api/copilotkit/runtime";
+const copilotRuntime = new CopilotRuntime();
+const copilotRuntimeEndpoint = copilotRuntimeNodeExpressEndpoint({
+  runtime: copilotRuntime,
+  serviceAdapter: new OpenAIAdapter({ model: "gpt-4o-mini" }),
+  endpoint: copilotRuntimeEndpointPath,
+});
 
 app.use(cors());
 app.use(express.json({ limit: "2mb" }));
+app.use((req, res, next) => {
+  if (!req.url.startsWith(copilotRuntimeEndpointPath)) {
+    next();
+    return;
+  }
+  Promise.resolve(copilotRuntimeEndpoint(req, res)).catch(next);
+});
 
 function hasUnresolvedInputPlaceholder(value?: string) {
   return typeof value === "string" && /\$\{input:[^}]+\}/.test(value);
@@ -172,6 +191,45 @@ const llmBodySchema = z.object({
   tools: z.array(z.record(z.string(), z.unknown())).optional(),
   temperature: z.number().min(0).max(2).optional(),
 });
+
+const copilotkitChatBodySchema = z
+  .object({
+    provider: providerSchema.optional(),
+    messages: z.array(z.record(z.string(), z.unknown())).optional(),
+    tools: z.array(z.record(z.string(), z.unknown())).optional(),
+    temperature: z.number().min(0).max(2).optional(),
+    forwardedParameters: z
+      .object({
+        temperature: z.number().min(0).max(2).optional(),
+      })
+      .optional(),
+    input: z
+      .object({
+        provider: providerSchema.optional(),
+        messages: z.array(z.record(z.string(), z.unknown())).optional(),
+        tools: z.array(z.record(z.string(), z.unknown())).optional(),
+        temperature: z.number().min(0).max(2).optional(),
+      })
+      .optional(),
+  })
+  .superRefine((value, ctx) => {
+    const provider = value.provider ?? value.input?.provider;
+    const messages = value.messages ?? value.input?.messages;
+    if (!provider) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: "CopilotKit chat requires provider configuration.",
+        path: ["provider"],
+      });
+    }
+    if (!messages) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: "CopilotKit chat requires at least one message.",
+        path: ["messages"],
+      });
+    }
+  });
 
 const serverTestSchema = z
   .object({
@@ -1633,98 +1691,163 @@ app.post("/api/desktop/choose-output-folder", async (req, res) => {
   }
 });
 
-app.post("/api/llm/chat", async (req, res) => {
-  const parsed = llmBodySchema.safeParse(req.body);
+class UpstreamRequestError extends Error {
+  status: number;
+
+  constructor(status: number, message: string) {
+    super(message);
+    this.status = status;
+  }
+}
+
+function toOpenAiMessageEnvelope(body: Record<string, unknown>) {
+  const choices = body.choices;
+  if (Array.isArray(choices)) return body;
+  return {
+    choices: [
+      {
+        message: {
+          content: "",
+          tool_calls: [],
+        },
+      },
+    ],
+    ...body,
+  };
+}
+
+function toCopilotKitPayload(
+  body: z.infer<typeof copilotkitChatBodySchema>
+): z.infer<typeof llmBodySchema> {
+  return {
+    provider: body.provider ?? body.input?.provider!,
+    messages: body.messages ?? body.input?.messages ?? [],
+    tools: body.tools ?? body.input?.tools,
+    temperature:
+      body.temperature ?? body.forwardedParameters?.temperature ?? body.input?.temperature,
+  };
+}
+
+async function requestProviderChat(
+  payload: z.infer<typeof llmBodySchema>
+): Promise<Record<string, unknown>> {
+  const resolvedApiKey = await resolveProviderApiKey(payload.provider);
+  const endpoint = providerEndpoint(payload, resolvedApiKey);
+  const upstream = await fetch(endpoint, {
+    method: "POST",
+    headers: providerAuthHeaders(payload.provider, resolvedApiKey),
+    body: JSON.stringify(providerChatBody(payload)),
+  });
+
+  const bodyText = await upstream.text();
+  if (!upstream.ok) {
+    throw new UpstreamRequestError(upstream.status, bodyText);
+  }
+
+  if (payload.provider.type === "anthropic") {
+    const json = JSON.parse(bodyText) as {
+      content?: Array<{ type?: string; text?: string }>;
+      usage?: { input_tokens?: number; output_tokens?: number };
+    };
+    const text = (json.content ?? [])
+      .filter((item) => item.type === "text")
+      .map((item) => item.text ?? "")
+      .join("\n");
+    const promptTokens =
+      typeof json.usage?.input_tokens === "number" ? json.usage.input_tokens : undefined;
+    const completionTokens =
+      typeof json.usage?.output_tokens === "number" ? json.usage.output_tokens : undefined;
+    return {
+      choices: [{ message: { content: text, tool_calls: [] } }],
+      usage:
+        promptTokens === undefined && completionTokens === undefined
+          ? undefined
+          : {
+              prompt_tokens: promptTokens ?? 0,
+              completion_tokens: completionTokens ?? 0,
+              total_tokens: (promptTokens ?? 0) + (completionTokens ?? 0),
+            },
+    };
+  }
+
+  if (payload.provider.type === "google") {
+    const json = JSON.parse(bodyText) as {
+      candidates?: Array<{ content?: { parts?: Array<{ text?: string }> } }>;
+      usageMetadata?: {
+        promptTokenCount?: number;
+        candidatesTokenCount?: number;
+        totalTokenCount?: number;
+      };
+    };
+    const text =
+      json.candidates?.[0]?.content?.parts
+        ?.map((part) => part.text ?? "")
+        .join("\n") ?? "";
+    const promptTokens =
+      typeof json.usageMetadata?.promptTokenCount === "number"
+        ? json.usageMetadata.promptTokenCount
+        : undefined;
+    const completionTokens =
+      typeof json.usageMetadata?.candidatesTokenCount === "number"
+        ? json.usageMetadata.candidatesTokenCount
+        : undefined;
+    const totalTokens =
+      typeof json.usageMetadata?.totalTokenCount === "number"
+        ? json.usageMetadata.totalTokenCount
+        : undefined;
+    return {
+      choices: [{ message: { content: text, tool_calls: [] } }],
+      usage:
+        promptTokens === undefined && completionTokens === undefined && totalTokens === undefined
+          ? undefined
+          : {
+              prompt_tokens: promptTokens ?? 0,
+              completion_tokens: completionTokens ?? 0,
+              total_tokens: totalTokens ?? (promptTokens ?? 0) + (completionTokens ?? 0),
+            },
+    };
+  }
+
+  const parsed = JSON.parse(bodyText) as unknown;
+  if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
+    return {
+      choices: [{ message: { content: String(parsed ?? ""), tool_calls: [] } }],
+    };
+  }
+  return toOpenAiMessageEnvelope(parsed as Record<string, unknown>);
+}
+
+app.post("/api/copilotkit/chat", async (req, res) => {
+  const parsed = copilotkitChatBodySchema.safeParse(req.body);
   if (!parsed.success) {
     res.status(400).json({ error: parsed.error.flatten() });
     return;
   }
 
-  const payload = parsed.data;
   try {
-    const resolvedApiKey = await resolveProviderApiKey(payload.provider);
-    const endpoint = providerEndpoint(payload, resolvedApiKey);
-    const upstream = await fetch(endpoint, {
-      method: "POST",
-      headers: providerAuthHeaders(payload.provider, resolvedApiKey),
-      body: JSON.stringify(providerChatBody(payload)),
+    const payload = toCopilotKitPayload(parsed.data);
+    const result = await requestProviderChat(payload);
+    const envelope = toOpenAiMessageEnvelope(result);
+    const firstChoice = Array.isArray(envelope.choices) ? envelope.choices[0] : undefined;
+    const firstMessage =
+      firstChoice && typeof firstChoice === "object" && "message" in firstChoice
+        ? (firstChoice as { message?: unknown }).message
+        : undefined;
+    res.json({
+      ...envelope,
+      output: {
+        message:
+          firstMessage && typeof firstMessage === "object"
+            ? firstMessage
+            : { content: "", tool_calls: [] },
+        usage: envelope.usage,
+      },
     });
-
-    const bodyText = await upstream.text();
-    if (!upstream.ok) {
-      res.status(upstream.status).json({ error: bodyText });
-      return;
-    }
-
-    if (payload.provider.type === "anthropic") {
-      const json = JSON.parse(bodyText) as {
-        content?: Array<{ type?: string; text?: string }>;
-        usage?: { input_tokens?: number; output_tokens?: number };
-      };
-      const text = (json.content ?? [])
-        .filter((item) => item.type === "text")
-        .map((item) => item.text ?? "")
-        .join("\n");
-      const promptTokens =
-        typeof json.usage?.input_tokens === "number" ? json.usage.input_tokens : undefined;
-      const completionTokens =
-        typeof json.usage?.output_tokens === "number" ? json.usage.output_tokens : undefined;
-      res.json({
-        choices: [{ message: { content: text, tool_calls: [] } }],
-        usage:
-          promptTokens === undefined && completionTokens === undefined
-            ? undefined
-            : {
-                prompt_tokens: promptTokens ?? 0,
-                completion_tokens: completionTokens ?? 0,
-                total_tokens: (promptTokens ?? 0) + (completionTokens ?? 0),
-              },
-      });
-      return;
-    }
-
-    if (payload.provider.type === "google") {
-      const json = JSON.parse(bodyText) as {
-        candidates?: Array<{ content?: { parts?: Array<{ text?: string }> } }>;
-        usageMetadata?: {
-          promptTokenCount?: number;
-          candidatesTokenCount?: number;
-          totalTokenCount?: number;
-        };
-      };
-      const text =
-        json.candidates?.[0]?.content?.parts
-          ?.map((part) => part.text ?? "")
-          .join("\n") ?? "";
-      const promptTokens =
-        typeof json.usageMetadata?.promptTokenCount === "number"
-          ? json.usageMetadata.promptTokenCount
-          : undefined;
-      const completionTokens =
-        typeof json.usageMetadata?.candidatesTokenCount === "number"
-          ? json.usageMetadata.candidatesTokenCount
-          : undefined;
-      const totalTokens =
-        typeof json.usageMetadata?.totalTokenCount === "number"
-          ? json.usageMetadata.totalTokenCount
-          : undefined;
-      res.json({
-        choices: [{ message: { content: text, tool_calls: [] } }],
-        usage:
-          promptTokens === undefined && completionTokens === undefined && totalTokens === undefined
-            ? undefined
-            : {
-                prompt_tokens: promptTokens ?? 0,
-                completion_tokens: completionTokens ?? 0,
-                total_tokens: totalTokens ?? (promptTokens ?? 0) + (completionTokens ?? 0),
-              },
-      });
-      return;
-    }
-
-    const contentType = upstream.headers.get("content-type") ?? "application/json";
-    res.status(200).type(contentType).send(bodyText);
   } catch (error) {
+    if (error instanceof UpstreamRequestError) {
+      res.status(error.status).json({ error: error.message });
+      return;
+    }
     res.status(502).json({
       error: error instanceof Error ? error.message : String(error),
     });

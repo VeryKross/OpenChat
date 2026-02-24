@@ -16,13 +16,21 @@ export interface LlmMessage {
 }
 
 interface LlmResponse {
-  choices: Array<{
+  choices?: Array<{
     message: { content: string | null; tool_calls?: ToolCall[] };
   }>;
   usage?: {
     prompt_tokens?: number;
     completion_tokens?: number;
     total_tokens?: number;
+  };
+  output?: {
+    message?: { content: string | null; tool_calls?: ToolCall[] };
+    usage?: {
+      prompt_tokens?: number;
+      completion_tokens?: number;
+      total_tokens?: number;
+    };
   };
 }
 
@@ -616,6 +624,7 @@ export async function runChat(params: {
   callTool: (aliasName: string, args: Record<string, unknown>) => Promise<ToolCallResult>;
   onXRayEvent: (event: XRayEvent) => void;
 }): Promise<{ finalText: string; updatedHistory: LlmMessage[]; lastUi?: ToolCallResult["uiMeta"] & { toolAlias: string; toolArgs: Record<string, unknown>; toolName: string; serverName: string } }> {
+  const llmEndpoint = "/api/copilotkit/chat";
   const MAX_ROUNDS = 6;
   const runStartedAt = Date.now();
   let lastEventTime = Date.now();
@@ -674,6 +683,7 @@ export async function runChat(params: {
     const detail = [
       `Outcome: ${outcome}`,
       `Total time: ${elapsedMs}ms (${formatElapsedMs(elapsedMs)})`,
+      `LLM endpoint: ${llmEndpoint}`,
       `Rounds: ${runStats.rounds}`,
       `LLM requests: ${runStats.llmRequests}`,
       `Retries handled: ${retryCount} (rate-limit: ${runStats.rateLimitRetries}, token-recovery: ${runStats.tokenRecoveryRetries})`,
@@ -759,6 +769,7 @@ export async function runChat(params: {
     type: "prompt_received",
     label: "Prompt Received",
     summary: "The chat request was accepted and processing started.",
+    resultSummary: `LLM endpoint ${llmEndpoint}`,
   });
 
   let skillEventsEmitted = false;
@@ -823,16 +834,20 @@ export async function runChat(params: {
     }
 
       const requestCompletion = async (includeTools: boolean, requestMessages: LlmMessage[]) => {
-        const requestBody = JSON.stringify({
+        const payload = {
           provider: params.provider,
           messages: requestMessages,
           tools: includeTools && toolsAllowed ? openAiTools : undefined,
+        };
+        const requestPayload = { input: payload };
+        const requestBody = JSON.stringify({
+          ...requestPayload,
         });
         const requestBytes = bytesForText(requestBody);
         runStats.llmRequests += 1;
         runStats.llmBytesSent += requestBytes;
         runStats.bytesSent += requestBytes;
-      const response = await apiFetch("/api/llm/chat", {
+      const response = await apiFetch(llmEndpoint, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
           body: requestBody,
@@ -947,7 +962,9 @@ export async function runChat(params: {
             : `LLM rate limit reached. Please retry shortly.${detail ? ` ${detail}` : ""}`
         );
       }
-      throw new Error(`LLM request failed (${completion.response.status}): ${completion.raw}`);
+      throw new Error(
+        `LLM request failed (${completion.response.status}) at ${llmEndpoint}: ${completion.raw}`
+      );
     }
 
       let data: LlmResponse;
@@ -956,13 +973,14 @@ export async function runChat(params: {
     } catch {
       throw new Error("LLM response was not valid JSON.");
     }
+      const usage = data.usage ?? data.output?.usage;
       const promptTokens =
-        typeof data.usage?.prompt_tokens === "number" ? data.usage.prompt_tokens : 0;
+        typeof usage?.prompt_tokens === "number" ? usage.prompt_tokens : 0;
       const completionTokens =
-        typeof data.usage?.completion_tokens === "number" ? data.usage.completion_tokens : 0;
+        typeof usage?.completion_tokens === "number" ? usage.completion_tokens : 0;
       const totalTokens =
-        typeof data.usage?.total_tokens === "number"
-          ? data.usage.total_tokens
+        typeof usage?.total_tokens === "number"
+          ? usage.total_tokens
           : promptTokens + completionTokens;
       if (promptTokens > 0 || completionTokens > 0 || totalTokens > 0) {
         runStats.promptTokens += promptTokens;
@@ -970,7 +988,7 @@ export async function runChat(params: {
         runStats.totalTokens += totalTokens;
         runStats.usageResponses += 1;
       }
-    const msg = data.choices[0]?.message;
+    const msg = data.choices?.[0]?.message ?? data.output?.message;
     if (!msg) throw new Error("LLM response did not include a message.");
 
     messages.push({
