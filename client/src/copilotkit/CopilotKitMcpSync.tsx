@@ -1,6 +1,10 @@
 import { useEffect } from "react";
 import { useCopilotChat } from "@copilotkit/react-core";
 
+/**
+ * Keeps CopilotKit's MCP server list synchronized with OpenChat-managed server settings.
+ * Depends on CopilotKit chat context (`useCopilotChat`) and deterministic server normalization.
+ */
 interface CopilotKitMcpServerConfig {
   endpoint: string;
   apiKey?: string;
@@ -22,6 +26,9 @@ function normalizeServers(servers: CopilotKitMcpServerConfig[]) {
     );
 }
 
+/**
+ * Headless bridge component that updates CopilotKit MCP config only when normalized server inputs differ.
+ */
 export function CopilotKitMcpSync({ servers }: CopilotKitMcpSyncProps) {
   const { mcpServers, setMcpServers } = useCopilotChat();
 
