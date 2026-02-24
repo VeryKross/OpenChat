@@ -3,6 +3,8 @@
 This document explains how OpenChat integrates CopilotKit in a desktop-first chat client architecture.
 It is intended for engineers evaluating practical CopilotKit usage in a real MCP-enabled application.
 
+https://www.copilotkit.ai/
+
 ## Integration goals
 
 OpenChat uses CopilotKit to provide:
