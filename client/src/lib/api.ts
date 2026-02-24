@@ -1,3 +1,7 @@
+/**
+ * Provides a runtime-aware API fetch layer used by the client in both browser and desktop-hosted modes.
+ * Depends on the desktop preload bridge (`window.openchatDesktop`) when available, with fetch fallback otherwise.
+ */
 function isDesktopLikeRuntime() {
   return window.location.protocol === "file:" || Boolean(window.openchatDesktop?.isDesktop);
 }
@@ -27,6 +31,9 @@ export function getApiBaseUrl() {
   return "";
 }
 
+/**
+ * Executes API requests using desktop IPC when present, otherwise falls back to direct HTTP with localhost retries.
+ */
 export async function apiFetch(path: string, init?: RequestInit) {
   if (isDesktopLikeRuntime() && window.openchatDesktop?.apiRequest) {
     const response = await window.openchatDesktop.apiRequest(path, toDesktopInit(init));

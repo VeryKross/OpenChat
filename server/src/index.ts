@@ -18,6 +18,12 @@ import { SSEClientTransport } from "@modelcontextprotocol/sdk/client/sse.js";
 import { StreamableHTTPClientTransport } from "@modelcontextprotocol/sdk/client/streamableHttp.js";
 import type { DiscoveredServerConfig, LlmRequestPayload } from "@openchat/shared";
 
+/**
+ * Main OpenChat server module: hosts REST endpoints for provider chat/model APIs, MCP server discovery,
+ * and stdio tool execution used by the client app.
+ * Critical dependencies: Express routing/middleware, Zod request validation, CopilotKit runtime endpoint,
+ * and MCP SDK transports/clients for server connectivity.
+ */
 type SkillSaveLocation = "user-global" | "project-local";
 
 interface SkillLibraryDefinition {
@@ -966,6 +972,9 @@ function readGhCliToken(): Promise<string> {
   });
 }
 
+/**
+ * Resolves the effective API credential for the selected provider, including GitHub CLI token lookup mode.
+ */
 async function resolveProviderApiKey(provider: LlmRequestPayload["provider"]) {
   if (provider.type !== "github-models") {
     return provider.apiKey.trim();
@@ -1044,6 +1053,9 @@ function providerAuthHeaders(
   };
 }
 
+/**
+ * Builds provider-specific request payloads from OpenChat's normalized chat payload.
+ */
 function providerChatBody(payload: LlmRequestPayload) {
   const normalizeModelForProvider = (providerType: LlmRequestPayload["provider"]["type"], model: string) => {
     if (providerType !== "github-models") return model;
@@ -1817,6 +1829,10 @@ async function requestProviderChat(
   return toOpenAiMessageEnvelope(parsed as Record<string, unknown>);
 }
 
+/**
+ * Unified chat endpoint consumed by the client; validates payload, forwards to selected provider,
+ * and returns an OpenAI-like envelope for consistent client parsing.
+ */
 app.post("/api/copilotkit/chat", async (req, res) => {
   const parsed = copilotkitChatBodySchema.safeParse(req.body);
   if (!parsed.success) {
@@ -1894,5 +1910,3 @@ const isDirectRun = entryFile === fileURLToPath(import.meta.url);
 if (isDirectRun) {
   void startOpenChatServer();
 }
-
-

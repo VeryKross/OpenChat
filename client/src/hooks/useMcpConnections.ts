@@ -6,9 +6,16 @@ import type { Tool } from "@modelcontextprotocol/sdk/types.js";
 import type { McpConnection, ServerConfig } from "../types";
 import { apiFetch } from "../lib/api";
 
+/**
+ * Manages MCP connection lifecycle for the UI, including mixed stdio/http/sse transports and live tool lists.
+ * Depends on the MCP SDK client transports plus the server `/api/servers/test` endpoint for stdio validation.
+ */
 type TransportMap = Map<string, StreamableHTTPClientTransport | SSEClientTransport>;
 type ServerTestResult = { ok?: boolean; tools?: Tool[]; error?: string };
 
+/**
+ * React hook that exposes connection state and connect/disconnect operations for configured MCP servers.
+ */
 export function useMcpConnections() {
   const [connections, setConnections] = useState<McpConnection[]>([]);
   const transportsRef = useRef<TransportMap>(new Map());
@@ -34,6 +41,7 @@ export function useMcpConnections() {
   }, []);
 
   const connectServers = useCallback(async (servers: ServerConfig[]) => {
+    // Connects enabled servers sequentially so the UI can surface incremental progress and per-server errors.
     await disconnectAll();
     const enabled = servers.filter((s) => s.enabled);
     if (enabled.length === 0) {
@@ -118,5 +126,4 @@ export function useMcpConnections() {
 
   return { connections, connectServers, disconnectAll };
 }
-
 
