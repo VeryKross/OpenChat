@@ -123,6 +123,25 @@ npm run build:desktop:mac
   - macOS DMG/ZIP on `macos-latest`
 - Outputs are uploaded as GitHub Actions artifacts.
 
+### GitHub release flow (recommended)
+
+To create a **new** release predictably:
+
+1. Bump `version` in root `package.json` (for example `0.1.2` → `0.1.3`) and merge to `main`.
+2. Run workflow **Publish Release** (`.github/workflows/publish-current.yml`) from `main`.
+3. Enter the same version string in the `version` input (example: `0.1.3`).
+4. Leave `update_existing=false` for normal releases (this prevents silently overwriting an existing tag/release).
+
+What this workflow does:
+- Verifies the requested release version matches `package.json`.
+- Builds Windows + macOS installers.
+- Validates artifact filenames match that version.
+- Creates GitHub release tag `v<version>` at the current `main` commit and publishes installers.
+
+Important behavior:
+- **Desktop Installers** run manually is build-only (unless triggered by a `v*` tag push).
+- **Publish Release** is the canonical release entry point for producing a new versioned GitHub release.
+
 ### App icon assets
 
 - Branded installer/app icons live in `desktop/assets/icons`:

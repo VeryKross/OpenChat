@@ -1,8 +1,12 @@
-name: Publish Current
+name: Publish Release
 
 on:
   workflow_dispatch:
     inputs:
+      version:
+        description: "Release version (must match package.json, e.g. 0.1.3)"
+        required: true
+        type: string
       draft:
         description: "Create draft release"
         required: false
@@ -13,11 +17,17 @@ on:
         required: false
         default: false
         type: boolean
+      update_existing:
+        description: "Update existing release assets for this version"
+        required: false
+        default: false
+        type: boolean
 
 jobs:
   windows-installer:
     name: Windows NSIS (${{ matrix.arch }})
     runs-on: windows-latest
+    if: github.ref == 'refs/heads/main'
     strategy:
       fail-fast: false
       matrix:
@@ -40,6 +50,18 @@ jobs:
           npm --prefix shared ci
           npm --prefix server ci
           npm --prefix client ci
+
+      - name: Validate package version
+        shell: bash
+        env:
+          RELEASE_VERSION: ${{ github.event.inputs.version }}
+        run: |
+          set -euo pipefail
+          pkg_version="$(node -p "require('./package.json').version")"
+          if [ "$pkg_version" != "$RELEASE_VERSION" ]; then
+            echo "package.json version ($pkg_version) does not match requested release version ($RELEASE_VERSION)." >&2
+            exit 1
+          fi
 
       - name: Export signing credentials (Windows)
         shell: bash
@@ -75,6 +97,7 @@ jobs:
   mac-installer:
     name: macOS DMG/ZIP
     runs-on: macos-latest
+    if: github.ref == 'refs/heads/main'
     env:
       CSC_IDENTITY_AUTO_DISCOVERY: "false"
     steps:
@@ -93,6 +116,18 @@ jobs:
           npm --prefix shared ci
           npm --prefix server ci
           npm --prefix client ci
+
+      - name: Validate package version
+        shell: bash
+        env:
+          RELEASE_VERSION: ${{ github.event.inputs.version }}
+        run: |
+          set -euo pipefail
+          pkg_version="$(node -p "require('./package.json').version")"
+          if [ "$pkg_version" != "$RELEASE_VERSION" ]; then
+            echo "package.json version ($pkg_version) does not match requested release version ($RELEASE_VERSION)." >&2
+            exit 1
+          fi
 
       - name: Export signing credentials (macOS)
         shell: bash
@@ -138,11 +173,9 @@ jobs:
     name: Publish Release Assets
     runs-on: ubuntu-latest
     needs: [windows-installer, mac-installer]
+    if: github.ref == 'refs/heads/main'
     permissions:
       contents: write
-    outputs:
-      version: ${{ steps.version.outputs.version }}
-      tag: ${{ steps.version.outputs.tag }}
     steps:
       - name: Download Windows artifacts
         uses: actions/download-artifact@v4
@@ -162,9 +195,10 @@ jobs:
           name: openchat-macos-installer
           path: release-assets/macos
 
-      - name: Detect release version from artifacts
-        id: version
+      - name: Validate artifact version
         shell: bash
+        env:
+          RELEASE_VERSION: ${{ github.event.inputs.version }}
         run: |
           set -euo pipefail
           mapfile -t versions < <(
@@ -183,28 +217,36 @@ jobs:
           fi
 
           version="${versions[0]}"
-          echo "version=$version" >> "$GITHUB_OUTPUT"
-          echo "tag=v$version" >> "$GITHUB_OUTPUT"
-          echo "Detected release version: $version"
+          if [ "$version" != "$RELEASE_VERSION" ]; then
+            echo "Artifact version ($version) does not match requested release version ($RELEASE_VERSION)." >&2
+            exit 1
+          fi
+          echo "Validated artifact version: $version"
 
       - name: Create or update GitHub release
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          TAG: ${{ steps.version.outputs.tag }}
-          VERSION: ${{ steps.version.outputs.version }}
+          TAG: v${{ github.event.inputs.version }}
+          VERSION: ${{ github.event.inputs.version }}
           DRAFT: ${{ github.event.inputs.draft }}
           PRERELEASE: ${{ github.event.inputs.prerelease }}
+          UPDATE_EXISTING: ${{ github.event.inputs.update_existing }}
         shell: bash
         run: |
           set -euo pipefail
           assets=(release-assets/windows/x64/*.exe release-assets/windows/arm64/*.exe release-assets/macos/*.dmg release-assets/macos/*.zip)
 
           if gh release view "$TAG" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
-            echo "Release $TAG exists; uploading/replacing assets."
-            gh release upload "$TAG" "${assets[@]}" --repo "$GITHUB_REPOSITORY" --clobber
+            if [ "$UPDATE_EXISTING" = "true" ]; then
+              echo "Release $TAG exists; uploading/replacing assets."
+              gh release upload "$TAG" "${assets[@]}" --repo "$GITHUB_REPOSITORY" --clobber
+            else
+              echo "Release $TAG already exists. Re-run with update_existing=true to replace assets." >&2
+              exit 1
+            fi
           else
             echo "Creating release $TAG."
-            args=("$TAG" "${assets[@]}" --repo "$GITHUB_REPOSITORY" --title "OpenChat v$VERSION" --generate-notes)
+            args=("$TAG" "${assets[@]}" --repo "$GITHUB_REPOSITORY" --target "$GITHUB_SHA" --title "OpenChat v$VERSION" --generate-notes)
             if [ "$DRAFT" = "true" ]; then
               args+=(--draft)
             fi
