@@ -2,6 +2,11 @@ import type { CallToolResult, Tool } from "@modelcontextprotocol/sdk/types.js";
 import type { ProviderConfig, XRayEvent } from "../types";
 import { apiFetch } from "../lib/api";
 
+/**
+ * Coordinates multi-round chat execution for the client, including skill selection, tool aliasing,
+ * MCP tool dispatch, and X-Ray telemetry emission.
+ * Depends on OpenChat provider/message contracts plus `apiFetch` for backend chat calls.
+ */
 interface ToolCall {
   id: string;
   type: "function";
@@ -63,6 +68,9 @@ interface SkillSelectionResult {
   scoreBySkillId: Record<string, number>;
 }
 
+/**
+ * Converts MCP tools into OpenAI function-tool schema while preserving an alias map back to original tool names.
+ */
 function toOpenAiTools(tools: Tool[]) {
   const aliasBySanitized = new Map<string, string>();
   const openAiTools = tools.map((tool, index) => {
@@ -614,6 +622,10 @@ function extractRateLimitWaitSeconds(raw: string, response: Response) {
   return undefined;
 }
 
+/**
+ * Runs one end-to-end chat turn by iteratively calling the LLM, executing requested tools, and returning
+ * the final assistant text with updated history/state for the next turn.
+ */
 export async function runChat(params: {
   prompt: string;
   provider: ProviderConfig;
@@ -1204,4 +1216,3 @@ export async function runChat(params: {
     lastUi,
   };
 }
-
