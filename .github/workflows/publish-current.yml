@@ -84,6 +84,27 @@ jobs:
             npm run build:desktop:win
           fi
 
+      - name: Smoke test packaged Windows runtime
+        shell: pwsh
+        run: |
+          $extractDir = Join-Path $env:RUNNER_TEMP "openchat-asar-${{ matrix.arch }}"
+          if (Test-Path $extractDir) {
+            Remove-Item -Recurse -Force $extractDir
+          }
+          npx asar extract "dist-desktop\win-unpacked\resources\app.asar" $extractDir
+
+          $langchainCore = Join-Path $extractDir "node_modules\@langchain\core\package.json"
+          if (!(Test-Path $langchainCore)) {
+            throw "Missing startup dependency in packaged app: $langchainCore"
+          }
+
+          $serverIndex = Join-Path $extractDir "server\dist\index.js"
+          if (!(Test-Path $serverIndex)) {
+            throw "Missing packaged server entrypoint: $serverIndex"
+          }
+
+          node -e "import('node:url').then(({ pathToFileURL }) => import(pathToFileURL(process.argv[1]).href)).then(() => process.exit(0)).catch((error) => { console.error(error); process.exit(1); })" $serverIndex
+
       - name: Upload Windows artifacts
         uses: actions/upload-artifact@v4
         with:

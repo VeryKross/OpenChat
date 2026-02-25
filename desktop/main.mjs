@@ -261,5 +261,10 @@ app.whenReady().then(async () => {
 }).catch((error) => {
   // eslint-disable-next-line no-console
   console.error("Failed to start OpenChat desktop runtime:", error);
+  const details = error instanceof Error ? `${error.name}: ${error.message}` : String(error);
+  dialog.showErrorBox(
+    "OpenChat failed to start",
+    `OpenChat could not start.\n\n${details}\n\nSee console logs for additional details.`
+  );
   app.quit();
 });

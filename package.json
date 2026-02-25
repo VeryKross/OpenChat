@@ -1,6 +1,6 @@
 {
   "name": "openchat",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "description": "OpenChat desktop app for LLM, MCP, and tool interaction transparency.",
   "author": "Ken Ross",
   "private": true,
@@ -29,6 +29,7 @@
   },
   "dependencies": {
     "@copilotkit/runtime": "^1.51.4",
+    "@langchain/core": "^0.3.80",
     "@modelcontextprotocol/sdk": "^1.26.0",
     "cors": "^2.8.6",
     "express": "^5.2.1",
