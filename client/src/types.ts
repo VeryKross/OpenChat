@@ -38,6 +38,7 @@ export interface UiRenderMeta {
   client?: Client;
   uiHtml: string;
   toolName: string;
+  serverName?: string;
   toolArgs: Record<string, unknown>;
   toolResult: CallToolResult;
   interactive?: boolean;

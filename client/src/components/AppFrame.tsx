@@ -13,9 +13,23 @@ interface AppFrameProps {
   client: Client;
   uiHtml: string;
   toolName: string;
+  serverName?: string;
   toolArgs: Record<string, unknown>;
   toolResult: CallToolResult;
   themeMode: ThemeMode;
+  onBridgeEvent?: (event: AppFrameBridgeEvent) => void;
+}
+
+export interface AppFrameBridgeEvent {
+  interactionId: string;
+  phase: "started" | "completed" | "failed";
+  timestamp: number;
+  durationMs?: number;
+  toolName: string;
+  serverName?: string;
+  toolArgs?: Record<string, unknown>;
+  resultSummary?: string;
+  rawDetail?: string;
 }
 
 function readCssVariable(styles: CSSStyleDeclaration, name: string) {
@@ -75,13 +89,32 @@ function getHostContext(
   };
 }
 
+function summarizeToolResult(result: CallToolResult): { summary: string; rawDetail?: string } {
+  const textResult = result.content
+    .map((content) => (content.type === "text" && "text" in content ? content.text : ""))
+    .filter(Boolean)
+    .join("\n")
+    .trim();
+
+  if (!textResult) {
+    return { summary: result.isError ? "Tool call failed." : "Tool call completed." };
+  }
+
+  return {
+    summary: textResult.length > 120 ? `${textResult.slice(0, 120)}…` : textResult,
+    rawDetail: textResult,
+  };
+}
+
 export function AppFrame({
   client,
   uiHtml,
   toolName,
+  serverName,
   toolArgs,
   toolResult,
   themeMode,
+  onBridgeEvent,
 }: AppFrameProps) {
   const iframeRef = useRef<HTMLIFrameElement>(null);
   const [height, setHeight] = useState(300);
@@ -133,6 +166,58 @@ export function AppFrame({
         return;
       }
 
+      bridge.oncalltool = async (params, extra) => {
+        const startedAt = Date.now();
+        const interactionId = `${startedAt}-${Math.random().toString(36).slice(2, 8)}`;
+        const interactionArgs =
+          params.arguments && typeof params.arguments === "object" && !Array.isArray(params.arguments)
+            ? (params.arguments as Record<string, unknown>)
+            : {};
+        onBridgeEvent?.({
+          interactionId,
+          phase: "started",
+          timestamp: startedAt,
+          toolName: params.name,
+          serverName,
+          toolArgs: interactionArgs,
+        });
+
+        try {
+          const result = (await client.callTool(params, undefined, {
+            signal: extra.signal,
+          })) as CallToolResult;
+          const endedAt = Date.now();
+          const resultInfo = summarizeToolResult(result);
+          onBridgeEvent?.({
+            interactionId,
+            phase: "completed",
+            timestamp: endedAt,
+            durationMs: Math.max(endedAt - startedAt, 0),
+            toolName: params.name,
+            serverName,
+            toolArgs: interactionArgs,
+            resultSummary: resultInfo.summary,
+            rawDetail: resultInfo.rawDetail,
+          });
+          return result;
+        } catch (error) {
+          const endedAt = Date.now();
+          const errorMessage = error instanceof Error ? error.message : String(error);
+          onBridgeEvent?.({
+            interactionId,
+            phase: "failed",
+            timestamp: endedAt,
+            durationMs: Math.max(endedAt - startedAt, 0),
+            toolName: params.name,
+            serverName,
+            toolArgs: interactionArgs,
+            resultSummary: errorMessage,
+            rawDetail: errorMessage,
+          });
+          throw error;
+        }
+      };
+
       bridge.setHostContext(getHostContext(iframe, themeMode));
       if (typeof ResizeObserver !== "undefined") {
         resizeObserver = new ResizeObserver(() => {
@@ -155,7 +240,7 @@ export function AppFrame({
       resizeObserver?.disconnect();
       void bridge?.close();
     };
-  }, [client, uiHtml, toolArgs, toolName, toolResult, themeMode]);
+  }, [client, onBridgeEvent, serverName, uiHtml, toolArgs, toolName, toolResult, themeMode]);
 
   return (
     <div className="app-frame">

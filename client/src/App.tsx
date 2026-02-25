@@ -2,7 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { Tool, CallToolResult } from "@modelcontextprotocol/sdk/types.js";
 import { getToolUiResourceUri } from "@modelcontextprotocol/ext-apps/app-bridge";
 import type { DiscoveredServerConfig, LlmProviderType } from "@openchat/shared";
-import { AppFrame } from "./components/AppFrame";
+import { AppFrame, type AppFrameBridgeEvent } from "./components/AppFrame";
 import { CopilotKitMcpSync } from "./copilotkit/CopilotKitMcpSync";
 import { subscribeCopilotKitXRayEvents } from "./copilotkit/xrayAdapter";
 import { HelpCenter } from "./components/HelpCenter";
@@ -238,6 +238,7 @@ export default function App() {
   const [configHydrated, setConfigHydrated] = useState(false);
   const [xrayOpen, setXrayOpen] = useState(false);
   const [xrayTurns, setXrayTurns] = useState<XRayTurn[]>([]);
+  const appInteractionTurnByIdRef = useRef(new Map<string, number>());
   const [serverTestStatus, setServerTestStatus] = useState<
     Record<string, { status: string; tools: Tool[] }>
   >({});
@@ -866,6 +867,87 @@ export default function App() {
     });
   };
 
+  const handleAppFrameBridgeEvent = useCallback((event: AppFrameBridgeEvent) => {
+    if (event.phase === "started") {
+      const prompt = `${event.serverName ?? "MCP"} app interaction`;
+      const serverLabel = event.serverName ?? "MCP server";
+      setXrayTurns((prev) => {
+        const interactionEvents: XRayEvent[] = [
+          {
+            type: "tool_selected",
+            label: "App Interaction",
+            summary: `Interactive app requested ${event.toolName}.`,
+            timestamp: event.timestamp,
+            toolName: event.toolName,
+            serverName: event.serverName,
+            toolArgs: event.toolArgs,
+            resultSummary: `Routing through ${serverLabel}`,
+          },
+          {
+            type: "server_called",
+            label: "Server Called",
+            summary: `Calling ${event.toolName} on ${serverLabel}.`,
+            timestamp: event.timestamp + 1,
+            durationMs: 1,
+            toolName: event.toolName,
+            serverName: event.serverName,
+            toolArgs: event.toolArgs,
+          },
+        ];
+        const interactionTurn: XRayTurn = {
+          prompt,
+          startedAt: event.timestamp,
+          complete: false,
+          events: interactionEvents,
+        };
+        const next = [
+          ...prev,
+          interactionTurn,
+        ];
+        appInteractionTurnByIdRef.current.set(event.interactionId, next.length - 1);
+        return next;
+      });
+      return;
+    }
+
+    const eventLabel = event.phase === "failed" ? "Call Failed" : "Data Returned";
+    const eventSummary =
+      event.resultSummary ??
+      (event.phase === "failed" ? "Interactive app tool call failed." : "Interactive app tool call succeeded.");
+    const completionEvent: XRayEvent = {
+      type: "data_returned",
+      label: eventLabel,
+      summary: eventSummary,
+      timestamp: event.timestamp,
+      durationMs: event.durationMs,
+      toolName: event.toolName,
+      serverName: event.serverName,
+      resultSummary: eventSummary,
+      rawDetail: event.rawDetail,
+    };
+
+    setXrayTurns((prev) => {
+      const index = appInteractionTurnByIdRef.current.get(event.interactionId);
+      if (index === undefined || index < 0 || index >= prev.length) {
+        return [
+          ...prev,
+          {
+            prompt: `${event.serverName ?? "MCP"} app interaction`,
+            startedAt: event.timestamp,
+            complete: true,
+            events: [completionEvent],
+          },
+        ];
+      }
+
+      const next = [...prev];
+      const current = next[index];
+      next[index] = { ...current, events: [...current.events, completionEvent], complete: true };
+      appInteractionTurnByIdRef.current.delete(event.interactionId);
+      return next;
+    });
+  }, []);
+
   useEffect(() => {
     return subscribeCopilotKitXRayEvents((event) => {
       setXrayTurns((prev) => {
@@ -1274,6 +1356,7 @@ export default function App() {
     historyRef.current = [];
     setMessages([]);
     setXrayTurns([]);
+    appInteractionTurnByIdRef.current.clear();
   };
 
   const handleSend = async () => {
@@ -1434,6 +1517,7 @@ export default function App() {
                 uiHtml: result.lastUi.uiHtml,
                 toolArgs: result.lastUi.toolArgs,
                 toolName: result.lastUi.toolName,
+                serverName: result.lastUi.serverName,
                 toolResult: result.lastUi.toolResult,
                 interactive: result.lastUi.interactive,
               }
@@ -2094,7 +2178,7 @@ export default function App() {
           </div>
         ) : (
           <div className="messages">
-            <div className="panel-header">
+            <div className="panel-header chat-header">
               <h2>Chat</h2>
               <span className="tool-count">
                 {activeConnections.length} connected
@@ -2118,9 +2202,11 @@ export default function App() {
                     client={message.uiMeta.client}
                     uiHtml={message.uiMeta.uiHtml}
                     toolName={message.uiMeta.toolName}
+                    serverName={message.uiMeta.serverName}
                     toolArgs={message.uiMeta.toolArgs}
                     toolResult={message.uiMeta.toolResult}
                     themeMode={themeMode}
+                    onBridgeEvent={handleAppFrameBridgeEvent}
                   />
                 )}
                 {message.uiMeta && !message.uiMeta.client && (
