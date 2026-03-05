@@ -609,6 +609,39 @@ async function fetchGitHubJson(url: string) {
   return JSON.parse(text) as unknown;
 }
 
+async function fetchGitHubJsonAllPages(url: string): Promise<unknown[]> {
+  const results: unknown[] = [];
+  const separator = url.includes("?") ? "&" : "?";
+  let pageUrl = `${url}${separator}per_page=100`;
+
+  for (;;) {
+    const resp: Response = await fetch(pageUrl, {
+      headers: {
+        Accept: "application/vnd.github+json",
+        "User-Agent": "OpenChat",
+      },
+    });
+    const text: string = await resp.text();
+    if (!resp.ok) {
+      throw new Error(`GitHub request failed (${resp.status}): ${text}`);
+    }
+    const data = JSON.parse(text) as unknown;
+    if (Array.isArray(data)) {
+      results.push(...data);
+    }
+
+    // GitHub Link headers use the format: <url>; rel="next"
+    const linkHeader: string | null = resp.headers.get("Link");
+    const next = linkHeader?.match(/<([^>]+)>;\s*rel="next"/);
+    if (!next) {
+      break;
+    }
+    pageUrl = next[1];
+  }
+
+  return results;
+}
+
 async function fetchGitHubRawBuffer(url: string) {
   const response = await fetch(url, {
     headers: {
@@ -670,7 +703,7 @@ async function installRemoteSkillDirectory(
     if (!next) break;
 
     const dirUrl = `https://api.github.com/repos/${owner}/${repo}/contents/${encodeURIComponent(next.remotePath).replace(/%2F/g, "/")}`;
-    const entries = (await fetchGitHubJson(dirUrl)) as Array<{
+    const entries = (await fetchGitHubJsonAllPages(dirUrl)) as Array<{
       type?: string;
       name?: string;
       path?: string;
@@ -705,7 +738,7 @@ async function installRemoteSkillDirectory(
 
 async function browseSkillLibrary(library: SkillLibraryDefinition): Promise<RemoteSkillInfo[]> {
   const listUrl = `https://api.github.com/repos/${library.owner}/${library.repo}/contents/${library.path}`;
-  const entries = (await fetchGitHubJson(listUrl)) as Array<{
+  const entries = (await fetchGitHubJsonAllPages(listUrl)) as Array<{
     type?: string;
     name?: string;
     path?: string;
