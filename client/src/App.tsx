@@ -765,7 +765,7 @@ export default function App() {
       return;
     }
     setModelLoadStatus('Enter your API key, then click "Load Models".');
-  }, [providerType, baseUrl, isCustomDirectMode, model, providerAuthMode]);
+  }, [providerType, baseUrl, isCustomDirectMode, providerAuthMode]);
 
   const providerConfig: ProviderConfig = useMemo(
     () => ({
