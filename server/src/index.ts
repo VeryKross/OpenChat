@@ -7,6 +7,7 @@ import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { z } from "zod";
+import AdmZip from "adm-zip";
 import {
   CopilotRuntime,
   OpenAIAdapter,
@@ -595,65 +596,111 @@ function parseSkillMarkdown(content: string, fallbackName: string) {
   return { name, description, version, tags, body };
 }
 
-async function fetchGitHubJson(url: string) {
-  const response = await fetch(url, {
-    headers: {
-      Accept: "application/vnd.github+json",
-      "User-Agent": "OpenChat",
-    },
-  });
-  const text = await response.text();
-  if (!response.ok) {
-    throw new Error(`GitHub request failed (${response.status}): ${text}`);
-  }
-  return JSON.parse(text) as unknown;
+const SKILL_LIBRARY_ARCHIVE_CACHE_MS = 5 * 60 * 1000;
+const skillLibraryArchiveCache = new Map<
+  string,
+  { expiresAt: number; zip: AdmZip; rootPrefix: string }
+>();
+
+function normalizePosixPath(value: string) {
+  return value.replace(/\\/g, "/").replace(/^\/+|\/+$/g, "");
 }
 
-async function fetchGitHubJsonAllPages(url: string): Promise<unknown[]> {
-  const results: unknown[] = [];
-  const separator = url.includes("?") ? "&" : "?";
-  let pageUrl = `${url}${separator}per_page=100`;
-
-  for (;;) {
-    const resp: Response = await fetch(pageUrl, {
-      headers: {
-        Accept: "application/vnd.github+json",
-        "User-Agent": "OpenChat",
-      },
-    });
-    const text: string = await resp.text();
-    if (!resp.ok) {
-      throw new Error(`GitHub request failed (${resp.status}): ${text}`);
-    }
-    const data = JSON.parse(text) as unknown;
-    if (Array.isArray(data)) {
-      results.push(...data);
-    }
-
-    // GitHub Link headers use the format: <url>; rel="next"
-    const linkHeader: string | null = resp.headers.get("Link");
-    const next = linkHeader?.match(/<([^>]+)>;\s*rel="next"/);
-    if (!next) {
-      break;
-    }
-    pageUrl = next[1];
+async function getSkillLibraryArchive(library: SkillLibraryDefinition) {
+  const cacheKey = `${library.owner}/${library.repo}`;
+  const now = Date.now();
+  const cached = skillLibraryArchiveCache.get(cacheKey);
+  if (cached && cached.expiresAt > now) {
+    return cached;
   }
 
-  return results;
-}
-
-async function fetchGitHubRawBuffer(url: string) {
-  const response = await fetch(url, {
-    headers: {
-      "User-Agent": "OpenChat",
-    },
+  const archiveUrl = `https://codeload.github.com/${library.owner}/${library.repo}/zip/refs/heads/main`;
+  const response = await fetch(archiveUrl, {
+    headers: { "User-Agent": "OpenChat" },
   });
   if (!response.ok) {
     const text = await response.text();
-    throw new Error(`GitHub raw content request failed (${response.status}): ${text}`);
+    throw new Error(`Skill library archive download failed (${response.status}): ${text}`);
   }
-  const data = await response.arrayBuffer();
-  return Buffer.from(data);
+  const zip = new AdmZip(Buffer.from(await response.arrayBuffer()));
+  const entries = zip.getEntries();
+  const firstPath = entries.find((entry: AdmZip.IZipEntry) => entry.entryName.includes("/"))?.entryName ?? "";
+  const rootSegment = firstPath.split("/")[0]?.trim();
+  if (!rootSegment) {
+    throw new Error("Downloaded skill archive is missing expected root folder.");
+  }
+
+  const cachedArchive = {
+    zip,
+    rootPrefix: `${rootSegment}/`,
+    expiresAt: now + SKILL_LIBRARY_ARCHIVE_CACHE_MS,
+  };
+  skillLibraryArchiveCache.set(cacheKey, cachedArchive);
+  return cachedArchive;
+}
+
+function getZipEntryText(zip: AdmZip, entryPath: string) {
+  const normalizedEntryPath = entryPath.replace(/\\/g, "/");
+  const entry = zip.getEntry(normalizedEntryPath);
+  if (!entry || entry.isDirectory) {
+    throw new Error(`Archive entry not found: ${normalizedEntryPath}`);
+  }
+  return entry.getData().toString("utf8");
+}
+
+function listSkillMarkdownPaths(zip: AdmZip, rootPrefix: string, libraryPath: string) {
+  const normalizedLibraryPath = normalizePosixPath(libraryPath);
+  const pathPrefix = `${rootPrefix}${normalizedLibraryPath}/`;
+  const paths = new Set<string>();
+  for (const entry of zip.getEntries()) {
+    if (entry.isDirectory) continue;
+    const normalizedEntry = entry.entryName.replace(/\\/g, "/");
+    if (!normalizedEntry.startsWith(pathPrefix)) continue;
+    if (!normalizedEntry.toLowerCase().endsWith("/skill.md")) continue;
+    const relative = normalizedEntry.slice(rootPrefix.length);
+    if (!relative) continue;
+    paths.add(relative);
+  }
+  return Array.from(paths.values()).sort((a, b) => a.localeCompare(b));
+}
+
+function installSkillDirectoryFromArchive(
+  zip: AdmZip,
+  rootPrefix: string,
+  remoteSkillDir: string,
+  localDir: string
+) {
+  const normalizedRemoteDir = normalizePosixPath(remoteSkillDir);
+  const sourcePrefix = `${rootPrefix}${normalizedRemoteDir}/`;
+  let fileCount = 0;
+
+  for (const entry of zip.getEntries()) {
+    if (entry.isDirectory) continue;
+    const normalizedEntry = entry.entryName.replace(/\\/g, "/");
+    if (!normalizedEntry.startsWith(sourcePrefix)) continue;
+    const relativePath = normalizedEntry.slice(sourcePrefix.length);
+    if (!relativePath) continue;
+    const normalizedRelative = path.posix.normalize(relativePath);
+    if (
+      !normalizedRelative ||
+      normalizedRelative === "." ||
+      normalizedRelative === ".." ||
+      normalizedRelative.startsWith("../")
+    ) {
+      throw new Error("Skill archive entry escapes destination root.");
+    }
+
+    const destination = path.join(localDir, ...normalizedRelative.split("/"));
+    ensurePathInside(localDir, destination);
+    fs.mkdirSync(path.dirname(destination), { recursive: true });
+    fs.writeFileSync(destination, entry.getData());
+    fileCount += 1;
+  }
+
+  if (fileCount === 0) {
+    throw new Error(`No files found for skill directory: ${normalizedRemoteDir}`);
+  }
+  return fileCount;
 }
 
 function resolveSkillLibrary(libraryId: string) {
@@ -661,16 +708,13 @@ function resolveSkillLibrary(libraryId: string) {
 }
 
 async function fetchRemoteSkillMarkdown(owner: string, repo: string, skillPath: string) {
-  const normalizedPath = skillPath.replace(/^\/+/, "");
-  const fileUrl = `https://api.github.com/repos/${owner}/${repo}/contents/${encodeURIComponent(normalizedPath).replace(/%2F/g, "/")}`;
-  const fileJson = (await fetchGitHubJson(fileUrl)) as {
-    content?: string;
-    encoding?: string;
-  };
-  if (!fileJson.content || fileJson.encoding !== "base64") {
-    throw new Error("Remote skill content was not returned as base64.");
+  const library = BUILTIN_SKILL_LIBRARIES.find((entry) => entry.owner === owner && entry.repo === repo);
+  if (!library) {
+    throw new Error(`Unknown skill library: ${owner}/${repo}`);
   }
-  return Buffer.from(fileJson.content.replace(/\n/g, ""), "base64").toString("utf8");
+  const { zip, rootPrefix } = await getSkillLibraryArchive(library);
+  const normalizedPath = normalizePosixPath(skillPath);
+  return getZipEntryText(zip, `${rootPrefix}${normalizedPath}`);
 }
 
 function ensurePathInside(root: string, candidate: string) {
@@ -687,72 +731,18 @@ function ensurePathInside(root: string, candidate: string) {
   }
 }
 
-async function installRemoteSkillDirectory(
-  owner: string,
-  repo: string,
-  remoteDirPath: string,
-  localDir: string
-) {
-  const queue: Array<{ remotePath: string; localPath: string }> = [
-    { remotePath: remoteDirPath.replace(/^\/+/, ""), localPath: localDir },
-  ];
-  let fileCount = 0;
-
-  while (queue.length > 0) {
-    const next = queue.shift();
-    if (!next) break;
-
-    const dirUrl = `https://api.github.com/repos/${owner}/${repo}/contents/${encodeURIComponent(next.remotePath).replace(/%2F/g, "/")}`;
-    const entries = (await fetchGitHubJsonAllPages(dirUrl)) as Array<{
-      type?: string;
-      name?: string;
-      path?: string;
-      download_url?: string | null;
-    }>;
-    if (!Array.isArray(entries)) {
-      throw new Error(`Expected directory listing for ${next.remotePath}.`);
-    }
-
-    fs.mkdirSync(next.localPath, { recursive: true });
-
-    for (const entry of entries) {
-      if (!entry.name || !entry.path) continue;
-      const destination = path.join(next.localPath, entry.name);
-      ensurePathInside(localDir, destination);
-
-      if (entry.type === "dir") {
-        queue.push({ remotePath: entry.path, localPath: destination });
-        continue;
-      }
-
-      if (entry.type !== "file" || !entry.download_url) continue;
-      const buffer = await fetchGitHubRawBuffer(entry.download_url);
-      fs.mkdirSync(path.dirname(destination), { recursive: true });
-      fs.writeFileSync(destination, buffer);
-      fileCount += 1;
-    }
-  }
-
-  return fileCount;
-}
-
 async function browseSkillLibrary(library: SkillLibraryDefinition): Promise<RemoteSkillInfo[]> {
-  const listUrl = `https://api.github.com/repos/${library.owner}/${library.repo}/contents/${library.path}`;
-  const entries = (await fetchGitHubJsonAllPages(listUrl)) as Array<{
-    type?: string;
-    name?: string;
-    path?: string;
-  }>;
+  const { zip, rootPrefix } = await getSkillLibraryArchive(library);
+  const skillMarkdownPaths = listSkillMarkdownPaths(zip, rootPrefix, library.path);
   const skills: RemoteSkillInfo[] = [];
 
-  for (const entry of entries) {
-    if (entry.type !== "dir" || !entry.name || !entry.path) continue;
-    const skillPath = `${entry.path}/SKILL.md`;
+  for (const skillPath of skillMarkdownPaths) {
     try {
-      const markdown = await fetchRemoteSkillMarkdown(library.owner, library.repo, skillPath);
-      const parsed = parseSkillMarkdown(markdown, entry.name);
+      const markdown = getZipEntryText(zip, `${rootPrefix}${skillPath}`);
+      const fallbackName = path.posix.basename(path.posix.dirname(skillPath));
+      const parsed = parseSkillMarkdown(markdown, fallbackName);
       skills.push({
-        id: slugify(parsed.name) || slugify(entry.name),
+        id: slugify(parsed.name) || slugify(path.posix.dirname(skillPath)),
         name: parsed.name,
         description: parsed.description,
         version: parsed.version,
@@ -1370,9 +1360,10 @@ app.post("/api/skills/install", async (req, res) => {
 
     const root = getSkillsDirectory(parsed.data.saveLocation);
     const skillDir = path.join(root, slug);
-    const installedFiles = await installRemoteSkillDirectory(
-      library.owner,
-      library.repo,
+    const { zip, rootPrefix } = await getSkillLibraryArchive(library);
+    const installedFiles = installSkillDirectoryFromArchive(
+      zip,
+      rootPrefix,
       remoteSkillDir,
       skillDir
     );

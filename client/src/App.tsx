@@ -478,6 +478,7 @@ export default function App() {
 
   const installSkill = async (skill: RemoteSkillInfo) => {
     setInstallingSkillPath(skill.skillPath);
+    setSkillsStatus(`Installing "${skill.name}" to ${installLocation}...`);
     try {
       const response = await apiFetch("/api/skills/install", {
         method: "POST",
@@ -490,7 +491,7 @@ export default function App() {
       });
       const data = (await response.json()) as { ok?: boolean; error?: string; skill?: { name?: string } };
       if (!response.ok || !data.ok) {
-        setSkillsStatus(data.error ?? "Failed to install skill.");
+        setSkillsStatus(data.error ?? `Failed to install "${skill.name}".`);
         return;
       }
       const installedName = data.skill?.name ?? skill.name;
@@ -498,7 +499,8 @@ export default function App() {
       setLastInstalledSkill({ name: installedName, location: installLocation });
       await loadLocalSkills();
     } catch (error) {
-      setSkillsStatus(error instanceof Error ? error.message : String(error));
+      const reason = error instanceof Error ? error.message : String(error);
+      setSkillsStatus(`Failed to install "${skill.name}": ${reason}`);
     } finally {
       setInstallingSkillPath(null);
     }

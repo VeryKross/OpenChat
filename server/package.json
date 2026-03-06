@@ -13,11 +13,13 @@
     "@copilotkit/runtime": "^1.51.4",
     "@modelcontextprotocol/sdk": "^1.26.0",
     "@openchat/shared": "file:../shared",
+    "adm-zip": "^0.5.16",
     "cors": "^2.8.6",
     "express": "^5.2.1",
     "zod": "^4.3.6"
   },
   "devDependencies": {
+    "@types/adm-zip": "^0.5.7",
     "@types/cors": "^2.8.19",
     "@types/express": "^5.0.6",
     "@types/node": "^25.3.0",
