@@ -1,11 +1,19 @@
 # OpenChat
 
-OpenChat is a desktop-first chat client for MCP servers with:
+OpenChat is a desktop AI chat client intended to be helpful when learning how to work MCP Servers and Skills:
 
-- user-selectable LLM provider/model (GitHub, OpenAI, Anthropic, Google, or Custom)
-- auto-discovered + manually configured MCP servers
+- User-selectable LLM provider/model (GitHub, OpenAI, Anthropic, Google, or Custom)
+- Auto-discovered + manually configured MCP servers
+- Installable Skills from online Skills library + manually created Skills
+- Edit installed Skills to learn how they work
 - MCP Apps interactive UI rendering (`ui://` resources)
-- an optional **🔍 XRay** explainability panel
+- View full tool descriptions for registred MCP servers
+- An optional **🔍 XRay** explainability panel
+  - Each node represents part of the conversation loop
+  - Nodes can be expanded to show addition details
+  - End node provides statistics for run, including token usage
+- Native installers provided for Windows x64 and ARM64, as well as Mac (zip and dmg)
+- Supports multiple UI styles (Dark, Light, custom) to help when testing MCP Server app extension UIs
 
 ### Dark Mode
 <img width="2142" height="1431" alt="image" src="https://github.com/user-attachments/assets/30cbc200-2010-44a1-91de-982e8da6d189" />
