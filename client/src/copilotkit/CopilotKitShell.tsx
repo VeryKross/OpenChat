@@ -1,4 +1,4 @@
-import { Component, type ErrorInfo, type ReactNode } from "react";
+import { Component, createContext, useContext, type ErrorInfo, type ReactNode } from "react";
 import type { CopilotErrorEvent } from "@copilotkit/shared";
 import { CopilotKit } from "@copilotkit/react-core";
 import {
@@ -9,6 +9,12 @@ import { publishCopilotKitXRayEvent } from "./xrayAdapter";
 
 interface CopilotKitShellProps {
   children: ReactNode;
+}
+
+const CopilotKitAvailabilityContext = createContext(false);
+
+export function useCopilotKitAvailable() {
+  return useContext(CopilotKitAvailabilityContext);
 }
 
 interface CopilotKitBoundaryProps {
@@ -38,17 +44,23 @@ class CopilotKitBoundary extends Component<CopilotKitBoundaryProps, CopilotKitBo
 }
 
 export function CopilotKitShell({ children }: CopilotKitShellProps) {
-  if (!isCopilotKitRuntimeConfigured()) return <>{children}</>;
+  if (!isCopilotKitRuntimeConfigured()) {
+    return <CopilotKitAvailabilityContext.Provider value={false}>{children}</CopilotKitAvailabilityContext.Provider>;
+  }
 
   return (
-    <CopilotKitBoundary fallback={<>{children}</>}>
-      <CopilotKit
-        runtimeUrl={getCopilotKitRuntimeUrl()}
-        showDevConsole={false}
-        onError={(event: CopilotErrorEvent) => publishCopilotKitXRayEvent(event)}
-      >
-        {children}
-      </CopilotKit>
+    <CopilotKitBoundary
+      fallback={<CopilotKitAvailabilityContext.Provider value={false}>{children}</CopilotKitAvailabilityContext.Provider>}
+    >
+      <CopilotKitAvailabilityContext.Provider value={true}>
+        <CopilotKit
+          runtimeUrl={getCopilotKitRuntimeUrl()}
+          showDevConsole={false}
+          onError={(event: CopilotErrorEvent) => publishCopilotKitXRayEvent(event)}
+        >
+          {children}
+        </CopilotKit>
+      </CopilotKitAvailabilityContext.Provider>
     </CopilotKitBoundary>
   );
 }

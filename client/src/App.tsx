@@ -4,6 +4,7 @@ import { getToolUiResourceUri } from "@modelcontextprotocol/ext-apps/app-bridge"
 import type { DiscoveredServerConfig, LlmProviderType } from "@openchat/shared";
 import { AppFrame, type AppFrameBridgeEvent } from "./components/AppFrame";
 import { CopilotKitMcpSync } from "./copilotkit/CopilotKitMcpSync";
+import { useCopilotKitAvailable } from "./copilotkit/CopilotKitShell";
 import { subscribeCopilotKitXRayEvents } from "./copilotkit/xrayAdapter";
 import { HelpCenter } from "./components/HelpCenter";
 import { XRayPanel } from "./components/XRayPanel";
@@ -295,6 +296,7 @@ export default function App() {
   );
 
   const activeConnections = connections.filter((c) => c.status === "connected");
+  const isCopilotKitAvailable = useCopilotKitAvailable();
   const copilotKitMcpProjection = deriveCopilotKitMcpServers(servers);
   const transportModeLabel = "OpenChat MCP bridge (CopilotKit projected)";
   const enabledServersCount = servers.filter((server) => server.enabled).length;
@@ -351,7 +353,7 @@ export default function App() {
   const chatMode = activeConnections.length > 0 ? "LLM + MCP" : "LLM-only";
   const orchestrationMode = getOrchestrationModeLabel();
   const copilotKitRuntimeUrl = getCopilotKitRuntimeUrl();
-  const copilotKitMcpSyncEnabled = isCopilotKitRuntimeConfigured();
+  const copilotKitMcpSyncEnabled = isCopilotKitRuntimeConfigured() && isCopilotKitAvailable;
   const isDesktopRuntime = window.location.protocol === "file:" || Boolean(window.openchatDesktop?.isDesktop);
   const apiUnavailableHint = isDesktopRuntime
     ? "OpenChat local API is unavailable. Restart OpenChat and try again."
