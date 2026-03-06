@@ -31,7 +31,7 @@ jobs:
           npm ci
           npm --prefix shared ci
           npm --prefix server ci
-          npm --prefix client ci
+          npm --prefix client ci --legacy-peer-deps
 
       - name: Export signing credentials (Windows)
         shell: bash
@@ -84,7 +84,7 @@ jobs:
           npm ci
           npm --prefix shared ci
           npm --prefix server ci
-          npm --prefix client ci
+          npm --prefix client ci --legacy-peer-deps
 
       - name: Export signing credentials (macOS)
         shell: bash

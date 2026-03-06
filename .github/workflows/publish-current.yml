@@ -49,7 +49,7 @@ jobs:
           npm ci
           npm --prefix shared ci
           npm --prefix server ci
-          npm --prefix client ci
+          npm --prefix client ci --legacy-peer-deps
 
       - name: Validate package version
         shell: bash
@@ -148,7 +148,7 @@ jobs:
           npm ci
           npm --prefix shared ci
           npm --prefix server ci
-          npm --prefix client ci
+          npm --prefix client ci --legacy-peer-deps
 
       - name: Validate package version
         shell: bash
